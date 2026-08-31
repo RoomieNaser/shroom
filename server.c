@@ -5,6 +5,21 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 
+#define MAX_CLIENTS 100
+
+//for registration stuff
+typedef struct {
+	char username[50];
+	char key[50];
+	int socket;
+} Client;
+
+Client clients[MAX_CLIENTS];
+int client_count = 0;
+
+//using pthread's built in mutex instead of building one
+pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 void* handle_client(void* arg) {
 	int sock = *(int*)arg;
 	free(arg);
@@ -20,7 +35,41 @@ void* handle_client(void* arg) {
 			break;
 		}
 
-		//decryption, parse commands, re encrypts
+		char cmd[20], username[50], key_label[20], key[50];
+
+		if (sscanf(buffer, "%s %s %s %s", cmd, username, key_label, key) == 4){
+			if (strcmp(cmd, "REGISTER") == 0 && strcmp(key_label, "KEY") == 0){
+				pthread_mutex_lock(&clients_mutex);
+				int username_taken = 0;
+
+				for (int i = 0; i < client_count; i++){
+					if (strcmp(clients[i].username, username) == 0){
+						username_taken = 1;
+						break;
+					}
+				}
+
+				if (username_taken){
+					char error_msg[100];
+					sprintf(error_msg, "WOMP WOMP username %s is already taken gng\n", username);
+					write(sock, error_msg, strlen(error_msg));
+				} else if (client_count < MAX_CLIENTS){
+					strcpy(clients[client_count].username, username);
+					strcpy(clients[client_count].key, key);
+					clients[client_count].socket = sock;
+					client_count++;
+
+					char success_msg[100];
+					sprintf(success_msg, "Registration Successful %s, YIPPEE\n", username);
+					write(sock, success_msg, strlen(success_msg));
+					printf("Welcome to Shroom, %s!\n", username);
+				}
+				pthread_mutex_unlock(&clients_mutex);
+				continue;
+			}
+		}
+
+		//decryption, re encrypts
 
 		printf("Received bytes: %d\n", readBytes);
 	}
