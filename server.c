@@ -5,6 +5,9 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 
+#include "cipher.h"
+#include "file_utils.h"
+
 #define MAX_CLIENTS 100
 
 //for registration stuff
@@ -24,7 +27,7 @@ void* handle_client(void* arg){
 	char current_user[50] = "";
 	int sock = *(int*)arg;
 	free(arg);
-	char buffer[2048];
+	char buffer[MAX_FILE_SIZE + 1024];
 
 	while (1) {
 		memset(buffer, 0, sizeof(buffer));
@@ -53,6 +56,17 @@ void* handle_client(void* arg){
 
 			close(sock);
 			break;
+		}
+
+		char sender_key[50] = "";
+		pthread_mutex_lock(&clients_mutex);
+		for (int i = 0; i < client_count; i++) {
+    			if (clients[i].socket == sock) strcpy(sender_key, clients[i].key);
+		}
+		pthread_mutex_unlock(&clients_mutex);
+
+		if (strlen(sender_key) > 0) {
+    			xor_cipher(buffer, readBytes, sender_key);
 		}
 
 		char cmd[20], username[50], key_label[20], key[50];
@@ -94,7 +108,7 @@ void* handle_client(void* arg){
 		char target[50];
 		char msg[1024];
 
-		if (sscanf(buffer, "SEND TO %[^:]:%[^\n]", target, msg) == 2){
+		if (sscanf(buffer, "SEND TO %49[^:]:%1023[^\n]", target, msg) == 2){
 			char* actual_msg = msg;
 			//skipping whitespaces in the beginning
 			if (actual_msg[0] == ' ') actual_msg++;
@@ -106,6 +120,7 @@ void* handle_client(void* arg){
 				if (strcmp(clients[i].username, target) == 0){
 					char formatted_msg[1200];
 					sprintf(formatted_msg, "FROM %s: %s\n", current_user, actual_msg);
+					xor_cipher(formatted_msg, strlen(formatted_msg), clients[i].key);
 					write(clients[i].socket, formatted_msg, strlen(formatted_msg));
 					found = 1;
 					break;
@@ -114,15 +129,56 @@ void* handle_client(void* arg){
 
 			if (!found){
 				char error_msg[100];
-				sprintf(error_msg, "ERROR: %s is currently touching grass\n", target);
+				sprintf(error_msg, "ERROR: %s is not online\n", target);
 				write(sock, error_msg, strlen(error_msg));
 			}
 
 			pthread_mutex_unlock(&clients_mutex);
 			continue;
 		}
+		
+		//File routing
+		if (strncmp(buffer, "SENDFILE TO ", 12) == 0) {
+    			char target[50], filename[256];
+    			long file_size;
 
-		if (strncmp(buffer, "SEND ", 5) == 0 || strncmp(buffer, "SENDFILE ", 9) == 0){
+    			// Locate the newline separating the header from the file payload
+    			char *newline_pos = strchr(buffer, '\n');
+    			if (newline_pos) {
+        		*newline_pos = '\0';
+        		sscanf(buffer, "SENDFILE TO %s %s %ld", target, filename, &file_size);
+        		*newline_pos = '\n';
+
+        		int header_len = (newline_pos - buffer) + 1;
+        		char *payload = buffer + header_len;
+
+        		pthread_mutex_lock(&clients_mutex);
+        		int found = 0;
+        		for (int i = 0; i < client_count; i++) {
+            			if (strcmp(clients[i].username, target) == 0) {
+                			char network_frame[MAX_FILE_SIZE + 1024];
+                			// Mirror the hop-by-hop routing by re-packaging as RECVFILE
+                			int out_header = sprintf(network_frame, "RECVFILE FROM %s %s %ld\n", current_user, filename, file_size);
+                			memcpy(network_frame + out_header, payload, file_size);
+					xor_cipher(network_frame, out_header + file_size, clients[i].key);
+
+                			write(clients[i].socket, network_frame, out_header + file_size);
+                			found = 1;
+                			break;
+            			}
+        		}
+
+        		if (!found) {
+            			char error_msg[100];
+            			sprintf(error_msg, "ERROR %s is not online\n", target);
+            			write(sock, error_msg, strlen(error_msg));
+        		}
+        		pthread_mutex_unlock(&clients_mutex);
+        		continue;
+    			}
+		}
+		//garbage fallback
+		if (strncmp(buffer, "SEND ", 5) == 0 || strncmp(buffer, "SENDFILE ", 9) == 0 || strncmp(buffer, "REGISTER", 9) == 0){
 			char err_format[] = "ERROR: Invalid command format\n";
 			write(sock, err_format, strlen(err_format));
 		} else {
@@ -135,7 +191,7 @@ void* handle_client(void* arg){
 		printf("Received bytes: %d\n", readBytes);
 	}
 	pthread_exit(NULL);
-}
+}	
 
 //main stuff
 int main(int argc, char const *argv[]){
