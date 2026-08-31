@@ -1,7 +1,7 @@
 # SHROOM
 
 ## Group Members
-* Syed Rumman Naser (2405394) - server + client + concurrency
+* Syed Rumman Naser (2405394) - server + client + concurrency + registration setup
 * Shreekant Singh (24051740) - cipher + file transfer
 
 ## How to Build
