@@ -122,6 +122,14 @@ void* handle_client(void* arg){
 			continue;
 		}
 
+		if (strncmp(buffer, "SEND ", 5) == 0 || strncmp(buffer, "SENDFILE ", 9) == 0){
+			char err_format[] = "ERROR: Invalid command format\n";
+			write(sock, err_format, strlen(err_format));
+		} else {
+			char err_unknown[] = "ERROR unknown command\n";
+			write(sock, err_unknown, strlen(err_unknown));
+		}
+
 		//decryption, re encrypts
 
 		printf("Received bytes: %d\n", readBytes);
