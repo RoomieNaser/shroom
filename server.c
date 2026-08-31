@@ -20,7 +20,8 @@ int client_count = 0;
 //using pthread's built in mutex instead of building one
 pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void* handle_client(void* arg) {
+void* handle_client(void* arg){
+	char current_user[50] = "";
 	int sock = *(int*)arg;
 	free(arg);
 	char buffer[2048];
@@ -30,7 +31,26 @@ void* handle_client(void* arg) {
 		int readBytes = read(sock, buffer, sizeof(buffer));
 
 		//cleaning up in case of abrupt disconnects
-		if (readBytes <= 0) {
+		if (readBytes <= 0 || strncmp(buffer, "QUIT", 4) == 0) {
+			pthread_mutex_lock(&clients_mutex);
+			for (int i = 0; i < client_count; i++){
+				if (clients[i].socket == sock){
+					for (int j = i; j < client_count - 1; j++){
+						//leftShift the remaining clients to remove disconnected user
+						clients[j] = clients[j + 1];
+					}
+					client_count--;
+					break;
+				}
+			}
+			pthread_mutex_unlock(&clients_mutex);
+
+			if (strncmp(buffer, "QUIT", 4) == 0){
+				char goodbye[150];
+				sprintf(goodbye, "GOODBYE %s, Shroom will be lonely without you D: \n", current_user);
+				write(sock, goodbye, strlen(goodbye));
+			}
+
 			close(sock);
 			break;
 		}
@@ -63,10 +83,43 @@ void* handle_client(void* arg) {
 					sprintf(success_msg, "Registration Successful %s, YIPPEE\n", username);
 					write(sock, success_msg, strlen(success_msg));
 					printf("Welcome to Shroom, %s!\n", username);
+					strcpy(current_user, username);
 				}
 				pthread_mutex_unlock(&clients_mutex);
 				continue;
 			}
+		}
+
+		//sendTo routing setup
+		char target[50];
+		char msg[1024];
+
+		if (sscanf(buffer, "SEND TO %[^:]:%[^\n]", target, msg) == 2){
+			char* actual_msg = msg;
+			//skipping whitespaces in the beginning
+			if (actual_msg[0] == ' ') actual_msg++;
+
+			pthread_mutex_lock(&clients_mutex);
+			int found = 0;
+
+			for (int i = 0; i < client_count; i++){
+				if (strcmp(clients[i].username, target) == 0){
+					char formatted_msg[1200];
+					sprintf(formatted_msg, "FROM %s: %s\n", current_user, actual_msg);
+					write(clients[i].socket, formatted_msg, strlen(formatted_msg));
+					found = 1;
+					break;
+				}
+			}
+
+			if (!found){
+				char error_msg[100];
+				sprintf(error_msg, "ERROR: %s is currently touching grass\n", target);
+				write(sock, error_msg, strlen(error_msg));
+			}
+
+			pthread_mutex_unlock(&clients_mutex);
+			continue;
 		}
 
 		//decryption, re encrypts
