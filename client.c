@@ -80,8 +80,7 @@ int main(int argc, char const *argv[]){
         
         if (strcmp(input_buffer, "QUIT") == 0){
             write(sock, input_buffer, strlen(input_buffer));
-            close(sock);
-            break;
+            continue;
         }
 
         int send_len = strlen(input_buffer);

@@ -35,9 +35,11 @@ void* handle_client(void* arg){
 
         //cleaning up in case of abrupt disconnects
         if (readBytes <= 0 || strncmp(buffer, "QUIT", 4) == 0) {
+            char removed_key[50] = "";
             pthread_mutex_lock(&clients_mutex);
             for (int i = 0; i < client_count; i++){
                 if (clients[i].socket == sock){
+                    strcpy(removed_key, clients[i].key); // Save key before removing
                     for (int j = i; j < client_count - 1; j++){
                         //leftShift the remaining clients to remove disconnected user
                         clients[j] = clients[j + 1];
@@ -50,8 +52,9 @@ void* handle_client(void* arg){
 
             if (strncmp(buffer, "QUIT", 4) == 0){
                 char goodbye[150];
-                sprintf(goodbye, "GOODBYE %s, Shroom will be lonely without you D: \n", current_user);
-                write(sock, goodbye, strlen(goodbye));
+                int len = sprintf(goodbye, "GOODBYE %s, Shroom will be lonely without you D: \n", current_user);
+                if (strlen(removed_key) > 0) xor_cipher(goodbye, len, removed_key);
+                write(sock, goodbye, len);
             }
 
             close(sock);
@@ -132,8 +135,9 @@ void* handle_client(void* arg){
 
             if (!found){
                 char error_msg[100];
-                sprintf(error_msg, "ERROR: %s is not online\n", target);
-                write(sock, error_msg, strlen(error_msg));
+                int len = sprintf(error_msg, "ERROR: %s is not online\n", target);
+                if (strlen(sender_key) > 0) xor_cipher(error_msg, len, sender_key);
+                write(sock, error_msg, len);
             }
 
             pthread_mutex_unlock(&clients_mutex);
@@ -173,24 +177,31 @@ void* handle_client(void* arg){
 
                 if (!found) {
                         char error_msg[100];
-                        sprintf(error_msg, "ERROR %s is not online\n", target);
-                        write(sock, error_msg, strlen(error_msg));
+                        int len = sprintf(error_msg, "ERROR %s is not online\n", target);
+                        if (strlen(sender_key) > 0) xor_cipher(error_msg, len, sender_key);
+                        write(sock, error_msg, len);
                 }
+
                 pthread_mutex_unlock(&clients_mutex);
                 continue;
                 }
         }
+
         //garbage fallback
         if (strncmp(buffer, "SEND ", 5) == 0 || strncmp(buffer, "SENDFILE ", 9) == 0 || strncmp(buffer, "REGISTER", 9) == 0){
-            char err_format[] = "ERROR: Invalid command format\n";
-            write(sock, err_format, strlen(err_format));
+            char err_format[100];
+            int len = sprintf(err_format, "ERROR: Invalid command format\n");
+            if (strlen(sender_key) > 0) xor_cipher(err_format, len, sender_key);
+            write(sock, err_format, len);
         } else {
-            char err_unknown[] = "ERROR unknown command\n";
-            write(sock, err_unknown, strlen(err_unknown));
+            char err_unknown[100];
+            int len = sprintf(err_unknown, "ERROR unknown command\n");
+            if (strlen(sender_key) > 0) xor_cipher(err_unknown, len, sender_key);
+            write(sock, err_unknown, len);
         }
     }
     pthread_exit(NULL);
-}	
+}
 
 //main stuff
 int main(int argc, char const *argv[]){
